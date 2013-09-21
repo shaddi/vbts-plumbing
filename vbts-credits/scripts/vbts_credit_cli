@@ -1,0 +1,47 @@
+#!/usr/bin/python
+
+"""
+A CLI for manipulating VBTS credits.
+"""
+
+if __name__ == "__main__":
+    import argparse
+    import vbts_credit
+
+    parser = argparse.ArgumentParser(description="CLI for adjusting credit in local subscriber registry.")
+    operation = parser.add_mutually_exclusive_group()
+    operation.add_argument('--add', '-a', metavar="AMOUNT", type=int, action='store', help="Add credit.")
+    operation.add_argument('--deduct', '-d', metavar="AMOUNT",type=int,  action='store', help="Subtract credit.")
+    operation.add_argument('--set', metavar="NEW_VALUE", type=int, action='store', dest='set_', help="Set credit to specific amount.")
+    parser.add_argument('--name', '-n', action='store_true', help="Accept name instead of phone number.")
+    parser.add_argument('number', action='store', help="Phone number to adjust credit for (or SIP name if -n option used).")
+    parser.add_argument('reason', action='store', nargs='?', help="Reason for adjusting credit. (REQUIRED if updating)")
+    args = parser.parse_args()
+
+    print "User: %s" % args.number
+    if args.name:
+        name = args.number
+    else:
+        name = vbts_credit._name_from_number(args.number)
+
+    if name is None:
+        print "Could not find user."
+        exit(1)
+
+    print "Name: %s" % name
+
+    print "Current credits: %d" % vbts_credit.get(name)
+
+    if (args.add or args.deduct or args.set_) and not args.reason:
+        print "FAILING to adjust credit. Must provide a reason to adjust credit."
+        exit(3)
+
+    if args.add:
+        vbts_credit.add(args.add, name, args.reason)
+    elif args.deduct:
+        vbts_credit.deduct(args.deduct, name, args.reason)
+    elif args.set_:
+        vbts_credit.set_(args.set_, name, args.reason)
+    else:
+        exit(0)
+    print "Ending credits: %d" % vbts_credit.get(name) # only show if we adjusted

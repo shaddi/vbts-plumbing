@@ -1,0 +1,34 @@
+vbts-credits: Billing stuff for VBTS.
+
+Requirements
+============
+You need to have a compatible dialplan that looks like this somewhere:
+
+    <action application="set" data='service_type=outside_call'/>
+    <action application="set" data='credits=${python(OpenBTS_DB SELECT secondsRemaining FROM sip_buddies WHERE name="${username}")}'/>
+    <action application="set" data='call_tariff=${python(VBTS_DB_Get account_balance|name|${username})}'/>
+    <action application="set" data='sec_avail=${expr( floor(${credits} / (${call_tariff} / 60)))}'/>
+    <action application="set" data="execute_on_answer=sched_hangup +${sec_avail} alloted_timeout" />
+
+We use the "secondsRemaining" field to denote the amount of local currency the
+subscriber has in their account (that is, that field is in units of
+dollars/rupiah/etc, not seconds!).
+
+You need to have lighttpd and freeswitch installed as well. We assume the
+lighttpd webroot is /var/www; change setup.py if it's not.
+
+Freeswitch needs to have mod_xml_cdr set up to send CDR via HTTP POST to the
+address of your lighttpd server.
+
+Setting prices
+==============
+All the prices are set in the /etc/vbts_credits.conf file (it's just YAML). You
+can add any line with an integer value and treat it as a service type. You can
+adjust costs by changing this file; since vbts_credit does all the cost
+computation, the changes take effect immediately.
+
+Things this does
+================
+Assuming you have a compatible dialplan, this will handle charging people for
+the usage. vbts_credits is the main module that controls access to the
+subscriber registry.

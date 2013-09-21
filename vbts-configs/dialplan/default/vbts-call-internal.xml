@@ -1,0 +1,111 @@
+<!--
+Copyright 2013 Kurtis Heimerl, Shaddi Hasan ("the authors"). All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+   1. Redistributions of source code must retain the above copyright notice, this list of
+      conditions and the following disclaimer.
+
+   2. Redistributions in binary form must reproduce the above copyright notice, this list
+      of conditions and the following disclaimer in the documentation and/or other materials
+      provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHORS ''AS IS'' AND ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHORS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The views and conclusions contained in the software and documentation are those of the
+authors and should not be interpreted as representing official policies, either expressed
+or implied, of the authors.
+-->
+
+<!-- global settings -->
+<extension name="openbts" continue="true">
+  <condition>
+    <action inline="true" application="set" data="process_cdr=true"/>
+    <!-- free unless otherwise specified -->
+    <action inline="true" application="set" data='service_type=free_call'/>
+    <action inline="true" application="export" data='service_type=free_call'/>
+    <action inline="true" application="set" data='call_tariff=${python(VBTS_Get_Service_Tariff ${service_type})}'/>
+    <action inline="true" application="set" data='vbts_callerid=${python(VBTS_DB_Get callerid|name|${username})}'/>
+    <action inline="true" application="set" data='vbts_destid=${python(VBTS_DB_Get dial|exten|${destination_number}|dialdata_table)}'/>
+    <action inline="true" application="set" data='vbts_account_balance=${python(VBTS_DB_Get account_balance|name|${username})}'/>
+  </condition>
+</extension>
+
+<extension name="unprovisioned">
+  <condition field='${vbts_callerid}' expression='None'>
+    <action application="set" data='service_type=error_call'/>
+    <action application="export" data='service_type=error_call'/>
+  </condition>
+</extension>
+
+<extension name="credit_check">
+  <condition field="${destination_number}" expression="^888$">
+    <action application="set" data='res=${python(VBTS_Send_SMS ${vbts_callerid}|${destination_number}|Your balance is ${vbts_account_balance})}'/>
+  </condition>
+</extension>
+
+<extension name="number_check">
+  <condition field="${destination_number}" expression="^889$">
+    <action application="set" data='res=${python(VBTS_Send_SMS ${vbts_callerid}|${destination_number}|Your number is ${vbts_callerid})}'/>
+  </condition>
+</extension>
+
+<!-- SET RATES -->
+<extension name="local_rates" continue="true">
+  <condition field='${vbts_callerid}' expression="^\d+$"/>
+  <!-- this defines it as local... username is in DB -->
+  <condition field='${vbts_destid}' expression="IMSI\d{15}">
+    <action inline="true" application="set" data='service_type=local_call'/>
+    <action inline="true" application="export" data='service_type=local_call'/>
+    <action inline="true" application="set" data='call_tariff=${python(VBTS_Get_Service_Tariff ${service_type})}'/>
+  </condition>
+</extension>
+
+<extension name="outside_rates" continue="true">
+  <condition field='${vbts_callerid}' expression="^\d+$"/>
+  <!-- only outside if we've passed down to this point -->
+  <condition field='${vbts_destid}' expression="None">
+    <action inline="true" application="set" data='service_type=outside_call'/>
+    <action inline="true" application="export" data='service_type=outside_call'/>
+    <action inline="true" application="set" data='call_tariff=${python(VBTS_Get_Service_Tariff ${service_type})}'/>
+  </condition>
+</extension>
+
+<extension name="no_money">
+  <!-- free local numbers don't require money -->
+  <condition field='${vbts_callerid}' expression="^\d+$"/>
+  <condition field='${cond(${vbts_account_balance} <= ${call_tariff} ? YES : NO)}' expression="^YES$">
+    <action application="set" data='service_type=error_call'/>
+    <action application="export" data='service_type=error_call'/>
+    <action application="set" data='res=${python(VBTS_Send_SMS ${vbts_callerid}|888|Not enough credit in your account)}'/>
+    <action application="answer"/>
+    <action application="speak" data='flite|slt|Not enough credit'/>
+    <action application="hangup"/>
+  </condition>
+</extension>
+
+<!-- INTERNAL CALLS -->
+<extension name="local_call">
+  <condition field='${vbts_callerid}' expression="^\d+$"/>
+  <!-- this defines it as local... username is in DB -->
+  <condition field='${vbts_destid}' expression="IMSI\d{15}">
+    <action application="set" data='name=${vbts_destid}'/>
+    <action application="set" data='credits=${vbts_account_balance}'/>
+    <action application="set" data='sec_avail=${expr( floor(${credits} / (${call_tariff} / 60)))}'/>
+    <action application="set" data='ipaddr=${python(VBTS_DB_Get ipaddr|name|${name})}' />
+    <action application="set" data='port=${python(VBTS_DB_Get port|name|${name})}' />
+    <action application="set" data='effective_caller_id_number=${vbts_callerid}'/>
+    <action application="set" data="execute_on_answer=sched_hangup +${sec_avail} alloted_timeout" />
+    <action application="ring_ready" />
+    <action application="bridge" data="sofia/openbts/${name}@${ipaddr}:${port}"/>
+  </condition>
+</extension>

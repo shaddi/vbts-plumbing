@@ -1,0 +1,157 @@
+<!--
+Copyright 2013 Kurtis Heimerl, Shaddi Hasan ("the authors"). All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+   1. Redistributions of source code must retain the above copyright notice, this list of
+      conditions and the following disclaimer.
+
+   2. Redistributions in binary form must reproduce the above copyright notice, this list
+      of conditions and the following disclaimer in the documentation and/or other materials
+      provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHORS ''AS IS'' AND ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHORS OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The views and conclusions contained in the software and documentation are those of the
+authors and should not be interpreted as representing official policies, either expressed
+or implied, of the authors.
+-->
+
+<?xml version="1.0" encoding="utf-8"?>
+<include>
+  <context name="default">
+
+    <!-- set all the openbts variables -->
+    <extension name="openbts" continue="true">
+      <condition field="to_user" expression="^smsc$">
+        <!-- first, parse SMS -->
+        <action inline="true" application="python" data="VBTS_Parse_SMS"/>
+        <!-- second, look up sender -->
+        <!-- freeswitch eats 's, switch them up here -->
+        <action inline="true" application="python" data='VBTS_DB_Get callerid|name|${from_user}'/>
+        <!-- result in _openbts_ret -->
+        <action inline="true" application="set" data="vbts_callerid=${_openbts_ret}"/>
+        <!-- freeswitch eats 's, switch them up here -->
+        <action inline="true" application="python" data='VBTS_DB_Get dial|exten|${vbts_tp_dest_address}|dialdata_table'/>
+        <!-- result in _openbts_ret -->
+        <action inline="true" application="set" data="vbts_destid=${_openbts_ret}"/>
+        <action inline="true" application="python" data='VBTS_DB_Get account_balance|name|${from_user}'/>
+        <action inline="true" application="set" data="vbts_account_balance=${_openbts_ret}"/>
+        <action application="set" data="service_type=free_sms"/>
+      </condition>
+    </extension>
+
+    <!-- local utility functions -->
+
+    <!-- register a user in the subscriber registry -->
+    <extension name="registration_nexmo">
+      <!-- user not already provisioned -->
+      <condition field="${vbts_tp_dest_address}" expression="^101$"/>
+      <condition field="${vbts_callerid}" expression="^None$">
+        <action application="system" data='curl --data "from_name=${from_user}&ip=${from_sip_ip}&port=${from_sip_port}&ret_num=${vbts_tp_dest_address}" http://127.0.0.1:8081/nexmo_registration'/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+        <!-- if already provisioned -->
+        <anti-action application="python" data="VBTS_Send_SMS ${vbts_callerid}|${vbts_tp_dest_address}|Already registered with number ${vbts_callerid}"/>
+        <anti-action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+
+    <!-- don't do anything for now -->
+    <extension name="unprovisioned">
+      <condition field='${vbts_callerid}' expression='None'>
+        <action application="python" data="VBTS_Send_SMS_Direct ${from_user}|${from_sip_ip}|${from_sip_port}|101|Your phone is not provisioned"/>
+      </condition>
+    </extension>
+
+    <extension name="credit-transfer">
+      <condition field="${vbts_tp_dest_address}" expression="^887$">
+        <action application="python" data='VBTS_Transfer_Credit ${from_user}|${vbts_text}'/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+
+    <extension name="billing-check">
+      <condition field="${vbts_tp_dest_address}" expression="^888$">
+        <action application="python" data="VBTS_Send_SMS ${vbts_callerid}|${vbts_tp_dest_address}|Your balance is ${vbts_account_balance}"/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+
+    <extension name="number-check">
+      <condition field="${vbts_tp_dest_address}" expression="^889$">
+        <action application="python" data="VBTS_Send_SMS ${vbts_callerid}|${vbts_tp_dest_address}|Your number is ${vbts_callerid}"/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+
+
+    <extension name="echo">
+      <condition field="${vbts_tp_dest_address}" expression="^919$">
+        <action application="python" data="VBTS_Send_SMS ${vbts_callerid}|${vbts_tp_dest_address}|${vbts_text}"/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+
+    <!-- bad message -->
+    <extension name="error">
+      <condition field="${vbts_text}" expression="^@$|^\x05$">
+        <action application="python" data="VBTS_Send_SMS ${vbts_callerid}|${vbts_tp_dest_address}|Message not sent to ${vbts_tp_dest_address}"/>
+        <action application="set" data="service_type=error_sms"/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+
+    <!-- local routing -->
+    <extension name="no_money">
+      <condition field="${cond(${vbts_account_balance} <= 0 ? YES : NO)}" expression="^YES$">
+        <action application="python" data="VBTS_Send_SMS ${vbts_callerid}|000|No money in your account"/>
+        <action application="set" data="service_type=error_sms"/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+
+    <!-- local if username is in the DB -->
+    <!-- reencode for now... though I'll probably write a "forward" script -->
+    <extension name="forward_local">
+      <condition field='${vbts_destid}' expression="IMSI\d{15}">
+        <action application="set" data="service_type=local_sms"/>
+        <action application="python" data="VBTS_Send_SMS ${vbts_tp_dest_address}|${from_user}|${vbts_text}"/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+    <!-- outbound SMS -->
+
+    <!-- send everything else to nexmo and let them sort it out -->
+    <!-- if the message isn't accepted by nexmo, this extension doesn't match, and the user isn't billed. We just silently drop. -->
+    <extension name="forward_outbound">
+      <!-- free local numbers can't dial out -->
+      <condition field="${vbts_callerid}" expression="^\d{5}\d+$" />
+      <condition field="${vbts_tp_dest_address}" expression="^\+?\d+$">
+        <!-- The chatplan blocks on long-running statements. We use a local web service to do the send and billing in the background. -->
+        <action application="set" data="service_type=outside_sms"/>
+        <!-- had to remove a '-' from the -data here for XML parsing purposes -->
+        <action application="system" data='curl -data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+        <action application="system" data='curl -d "from_name=${from_user}&service_type=outside_sms&from_number=${vbts_callerid}&to=${vbts_tp_dest_address}&body=${vbts_text}" http://127.0.0.1:8081/out_nexmo_sms'/>
+      </condition>
+    </extension>
+
+    <!-- local routing -->
+    <extension name="address_check">
+      <condition field="${vbts_tp_dest_address}" expression="^(.*)$">
+        <action application="python" data="VBTS_Send_SMS ${vbts_callerid}|000|Invalid Address"/>
+        <action application="set" data="service_type=error_sms"/>
+        <action application="system" data='curl --data "from_name=${from_user}&service_type=${service_type}&destination=${vbts_tp_dest_address}" http://127.0.0.1:8081/smscdr'/>
+      </condition>
+    </extension>
+
+  </context>
+</include>

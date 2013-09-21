@@ -1,0 +1,4 @@
+Basic UX:
+- To transfer, user send NUMBER*AMOUNT to a short code.
+- User gets a message back saying "To confirm transferring AMOUNT to NUMBER, reply to this message with the word "C<code>" in the next 30 minutes.
+- Other user gets an SMS saying "You've gotten a transfer of AMOUNT from NUMBER. Your new balance is BALANCE."
