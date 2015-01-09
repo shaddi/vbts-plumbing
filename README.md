@@ -35,3 +35,6 @@ There are a lot of potential hangups in all this: building your own mini-phone n
 
  * [Kurtis Heimerl](http://www.eecs.berkeley.edu/~kheimerl/)
  * [Shaddi Hasan](http://www.eecs.berkeley.edu/~shaddi/)
+
+
+If you're looking for a ready-to-use solution, check out [Endaga](http://www.endaga.com)!
